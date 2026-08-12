@@ -141,3 +141,40 @@ pub static ZAPF_DINGBATS: [&str; 256] = [
     "a186", "a195", "a187", "a188", "a189", "a190", "a191", "",
 ];
 
+/// Adobe Symbol encoding: byte code -> glyph name ("" = undefined).
+/// Standard character set per PDF Reference appendix D.
+pub static SYMBOL: [&str; 256] = [
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+    "space", "exclam", "universal", "numbersign", "existential", "percent", "ampersand", "suchthat",
+    "parenleft", "parenright", "asteriskmath", "plus", "comma", "minus", "period", "slash",
+    "zero", "one", "two", "three", "four", "five", "six", "seven",
+    "eight", "nine", "colon", "semicolon", "less", "equal", "greater", "question",
+    "congruent", "Alpha", "Beta", "Chi", "Delta", "Epsilon", "Phi", "Gamma",
+    "Eta", "Iota", "theta1", "Kappa", "Lambda", "Mu", "Nu", "Omicron",
+    "Pi", "Theta", "Rho", "Sigma", "Tau", "Upsilon", "sigma1", "Omega",
+    "Xi", "Psi", "Zeta", "bracketleft", "therefore", "bracketright", "perpendicular", "underscore",
+    "radicalex", "alpha", "beta", "chi", "delta", "epsilon", "phi", "gamma",
+    "eta", "iota", "phi1", "kappa", "lambda", "mu", "nu", "omicron",
+    "pi", "theta", "rho", "sigma", "tau", "upsilon", "omega1", "omega",
+    "xi", "psi", "zeta", "braceleft", "bar", "braceright", "similar", "",
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+    "Euro", "Upsilon1", "minute", "lessequal", "fraction", "infinity", "florin", "club",
+    "diamond", "heart", "spade", "arrowboth", "arrowleft", "arrowup", "arrowright", "arrowdown",
+    "degree", "plusminus", "second", "greaterequal", "multiply", "proportional", "partialdiff", "bullet",
+    "divide", "notequal", "equivalence", "approxequal", "ellipsis", "arrowvertex", "arrowhorizex", "carriagereturn",
+    "aleph", "Ifraktur", "Rfraktur", "weierstrass", "circlemultiply", "circleplus", "emptyset", "intersection",
+    "union", "propersuperset", "reflexsuperset", "notsubset", "propersubset", "reflexsubset", "element", "notelement",
+    "angle", "gradient", "registerserif", "copyrightserif", "trademarkserif", "product", "radical", "dotmath",
+    "logicalnot", "logicaland", "logicalor", "arrowdblboth", "arrowdblleft", "arrowdblup", "arrowdblright", "arrowdbldown",
+    "lozenge", "angleleft", "registersans", "copyrightsans", "trademarksans", "summation", "parenlefttp", "parenleftex",
+    "parenleftbt", "bracketlefttp", "bracketleftex", "bracketleftbt", "bracelefttp", "braceleftmid", "braceleftbt", "braceex",
+    "apple", "", "", "", "", "", "", "",
+    "", "", "", "", "", "", "", "",
+];
+
