@@ -191,6 +191,10 @@ pub struct ImageRef {
     pub bbox: BBox,
     pub width: u32,
     pub height: u32,
+    /// Base64-encoded image data as a data URI (e.g. `data:image/jpeg;base64,…`),
+    /// or `None` if the image stream could not be decoded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
 }
 
 /// A hyperlink region. Exactly one of `uri` / `page` is typically set
