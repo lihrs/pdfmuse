@@ -74,7 +74,7 @@ pip install pdfmuse
 # Node
 npm install @pdfmuse/node   # native binding
 # WASM (browser)
-npm install @pdfmuse/core   # or build: wasm-pack build crates/pdfmuse-wasm --target web
+npm install @pdfmuse/core   # or build: wasm-pack build crates/pdfmuse-wasm --target web --out-name parsepdf_wasm
 ```
 
 ## Usage
