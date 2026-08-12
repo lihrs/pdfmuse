@@ -65,7 +65,11 @@ impl Font {
         // text stacks at one x). Normal fonts multiply by exactly 1.0 → unchanged.
         let wfactor = type3_width_factor(doc, dict);
         // A /ToUnicode CMap, when present, is the authoritative code → text map.
-        let to_unicode = to_unicode_map(doc, dict);
+        // However some PDF generators emit CMaps that map every code to
+        // U+F000+code (Private Use Area) — a "fake" CMap. Detect that and
+        // fall back to glyph-name resolution so symbols are recoverable.
+        let to_unicode_raw = to_unicode_map(doc, dict);
+        let to_unicode = to_unicode_raw.filter(|m| !is_pua_cmap(m));
 
         let glyphs = (0..256)
             .map(|c| Glyph {
@@ -99,7 +103,12 @@ impl Font {
 /// ToUnicode is keyed by the shown code, text is correct regardless of the CID
 /// mapping; widths assume CID == code (exact for Identity encodings).
 fn cid_font(doc: &Document, dict: &Dictionary, base: String) -> Font {
-    let to_unicode = to_unicode_map(doc, dict).unwrap_or_default();
+    let to_unicode_raw = to_unicode_map(doc, dict);
+    let to_unicode = match to_unicode_raw {
+        Some(ref map) if is_pua_cmap(map) => repair_pua_cmap(map),
+        Some(map) => map,
+        None => BTreeMap::new(),
+    };
     let (widths, default_width) = cid_widths(doc, dict);
     let unmapped_cid = to_unicode.is_empty();
     Font { code_bytes: 2, kind: FontKind::Cid { to_unicode, widths, default_width }, base, unmapped_cid }
@@ -171,6 +180,60 @@ fn to_unicode_map(doc: &Document, dict: &Dictionary) -> Option<std::collections:
     }
 }
 
+/// Detect a "fake" ToUnicode CMap where every destination is in the
+/// U+F000–U+F0FF Private Use Area — some PDF generators (legacy LaTeX font
+/// packages, older iText) emit `0xF000 + byte_code` mappings for symbol
+/// fonts instead of proper Unicode. When true, the encoding-based
+/// glyph-name resolution path usually gives better results.
+fn is_pua_cmap(map: &BTreeMap<u32, String>) -> bool {
+    if map.is_empty() {
+        return false;
+    }
+    map.values().all(|s| s.chars().all(|c| matches!(c as u32, 0xF000..=0xF0FF)))
+}
+
+/// Repair a PUA-based ToUnicode CMap by reinterpreting each U+F0XX code
+/// through known encodings (Symbol → WinAnsi).  CID fonts have no glyph-name
+/// fallback, so repairing the CMap is the only way to recover symbols.
+fn repair_pua_cmap(map: &BTreeMap<u32, String>) -> BTreeMap<u32, String> {
+    map.iter()
+        .map(|(cid, s)| {
+            let fixed: String = s.chars().map(resolve_pua_byte).collect();
+            (*cid, fixed)
+        })
+        .collect()
+}
+
+/// Reinterpret a single PUA character U+F0XX back to a real Unicode character.
+/// ASCII-range bytes (0x00–0x7F) prefer WinAnsi (Latin); extended bytes
+/// (0x80–0xFF) prefer Symbol (math).  If neither resolves, returns the original
+/// PUA char — keeping a glyph is better than losing the character entirely.
+fn resolve_pua_byte(c: char) -> char {
+    match c as u32 {
+        pua @ 0xF000..=0xF0FF => {
+            let byte = (pua - 0xF000) as usize;
+            if byte <= 0x7F {
+                try_resolve(encodings::WIN_ANSI[byte])
+                    .or_else(|| try_resolve(encodings::SYMBOL[byte]))
+                    .unwrap_or(c)
+            } else {
+                try_resolve(encodings::SYMBOL[byte])
+                    .or_else(|| try_resolve(encodings::WIN_ANSI[byte]))
+                    .unwrap_or(c)
+            }
+        }
+        _ => c,
+    }
+}
+
+/// Look up a glyph name → AGL → first Unicode char, if the name is known.
+fn try_resolve(name: &str) -> Option<char> {
+    if name.is_empty() {
+        return None;
+    }
+    name_to_unicode(name)?.chars().next()
+}
+
 fn number(o: &Object) -> f32 {
     match o {
         Object::Integer(i) => *i as f32,
@@ -208,7 +271,9 @@ fn base_encoding(doc: &Document, dict: &Dictionary, base: &str) -> &'static [&'s
         Some(b"WinAnsiEncoding") => &encodings::WIN_ANSI,
         Some(b"MacRomanEncoding") => &encodings::MAC_ROMAN,
         Some(b"StandardEncoding") => &encodings::STANDARD,
+        Some(b"Symbol") | Some(b"MacExpertEncoding") => &encodings::SYMBOL,
         _ if base.contains("ZapfDingbats") => &encodings::ZAPF_DINGBATS,
+        _ if base.contains("Symbol") => &encodings::SYMBOL,
         // Nominal default for a non-symbolic Type1 font.
         _ => &encodings::STANDARD,
     }
@@ -452,5 +517,151 @@ mod tests {
         };
         let font = Font::from_dict(&doc, &dict);
         assert_eq!(font.decode(u32::from(b'A')).0, Some("Z"));
+    }
+
+    #[test]
+    fn is_pua_cmap_true_when_all_values_are_in_pua_range() {
+        let mut map = BTreeMap::new();
+        map.insert(0x3D, "\u{F03D}".to_string());
+        map.insert(0x7B, "\u{F07B}".to_string());
+        map.insert(0xA3, "\u{F0A3}".to_string());
+        assert!(is_pua_cmap(&map));
+    }
+
+    #[test]
+    fn is_pua_cmap_false_when_empty() {
+        assert!(!is_pua_cmap(&BTreeMap::new()));
+    }
+
+    #[test]
+    fn is_pua_cmap_false_when_has_proper_unicode() {
+        let mut map = BTreeMap::new();
+        map.insert(0x41, "A".to_string());
+        map.insert(0x42, "B".to_string());
+        assert!(!is_pua_cmap(&map));
+    }
+
+    #[test]
+    fn is_pua_cmap_false_when_mixed_pua_and_normal() {
+        let mut map = BTreeMap::new();
+        map.insert(0x41, "A".to_string());
+        map.insert(0x3D, "\u{F03D}".to_string());
+        assert!(!is_pua_cmap(&map));
+    }
+
+    #[test]
+    fn simple_font_ignores_pua_cmap_uses_glyph_names() {
+        // Simulate a Symbol font with a "fake" PUA-based ToUnicode CMap.
+        // Code 0x3D (= in Symbol) should decode as "=" via the glyph name,
+        // NOT as U+F03D from the CMap.
+        let mut doc = empty_doc();
+        let cmap = b"1 beginbfchar\n<3D> <F03D>\nendbfchar".to_vec();
+        let tu_id = doc.add_object(Stream::new(lopdf::Dictionary::new(), cmap));
+        let dict = dictionary! {
+            "Type" => "Font", "Subtype" => "Type1",
+            "BaseFont" => "Symbol", "Encoding" => "Symbol",
+            "ToUnicode" => tu_id,
+        };
+        let font = Font::from_dict(&doc, &dict);
+        // Should get "=" from glyph-name resolution, not U+F03D from the CMap.
+        assert_eq!(font.decode(0x3D_u32).0, Some("="));
+    }
+
+    #[test]
+    fn symbol_font_decodes_math_symbols() {
+        let doc = empty_doc();
+        let dict = dictionary! {
+            "Type" => "Font", "Subtype" => "Type1",
+            "BaseFont" => "Symbol", "Encoding" => "Symbol",
+        };
+        let font = Font::from_dict(&doc, &dict);
+        // = (0x3D)
+        assert_eq!(font.decode(0x3D_u32).0, Some("="));
+        // ≤ (0xA3)
+        assert_eq!(font.decode(0xA3_u32).0, Some("\u{2264}"));
+        // ∪ (0xC8)
+        assert_eq!(font.decode(0xC8_u32).0, Some("\u{222A}"));
+        // { (0x7B)
+        assert_eq!(font.decode(0x7B_u32).0, Some("{"));
+        // < (0x3C)
+        assert_eq!(font.decode(0x3C_u32).0, Some("<"));
+    }
+
+    #[test]
+    fn symbol_encoding_by_base_name() {
+        // When the Encoding is omitted but the BaseFont contains "Symbol",
+        // the Symbol encoding should be used.
+        let doc = empty_doc();
+        let dict = dictionary! {
+            "Type" => "Font", "Subtype" => "Type1",
+            "BaseFont" => "SymbolMT",
+        };
+        let font = Font::from_dict(&doc, &dict);
+        // ≤ (0xA3) should resolve via Symbol encoding → "lessequal" → U+2264.
+        assert_eq!(font.decode(0xA3_u32).0, Some("\u{2264}"));
+    }
+
+    #[test]
+    fn type0_pua_cmap_is_repaired_not_discarded() {
+        let mut doc = empty_doc();
+        // PUA CMap mapping codes to U+F000+byte → should be repaired via
+        // Symbol encoding lookups, not discarded.
+        // 0x0001 → U+F03D (byte 0x3D = "equal" → "=")
+        // 0x0002 → U+F0A3 (byte 0xA3 = "lessequal" → "≤")
+        let cmap = b"1 beginbfchar\n<0001> <F03D>\n<0002> <F0A3>\nendbfchar".to_vec();
+        let tu = doc.add_object(Stream::new(lopdf::Dictionary::new(), cmap));
+        let cidfont = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "X",
+        });
+        let dict = dictionary! {
+            "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X",
+            "Encoding" => "Identity-H",
+            "DescendantFonts" => vec![Object::Reference(cidfont)],
+            "ToUnicode" => tu,
+        };
+        let f = Font::from_dict(&doc, &dict);
+        assert!(!f.unmapped_cid, "PUA CMap should be repaired, not discarded");
+        assert_eq!(f.decode(0x0001).0, Some("="));
+        assert_eq!(f.decode(0x0002).0, Some("\u{2264}"));
+    }
+
+    #[test]
+    fn resolve_pua_byte_symbol_encoding() {
+        // U+F0C8 → byte 0xC8 → Symbol[0xC8] = "union" → "∪"
+        assert_eq!(resolve_pua_byte('\u{F0C8}'), '\u{222A}');
+        // U+F03D → byte 0x3D → Symbol[0x3D] = "equal" → "="
+        assert_eq!(resolve_pua_byte('\u{F03D}'), '=');
+        // U+F07B → byte 0x7B → Symbol[0x7B] = "braceleft" → "{"
+        assert_eq!(resolve_pua_byte('\u{F07B}'), '{');
+        // Non-PUA char passes through unchanged
+        assert_eq!(resolve_pua_byte('A'), 'A');
+    }
+
+    #[test]
+    fn resolve_pua_byte_ascii_prefers_winansi() {
+        // U+F041 → byte 0x41 ≤ 0x7F → WinAnsi first → "A", not Symbol "Alpha" (Α)
+        assert_eq!(resolve_pua_byte('\u{F041}'), 'A');
+        // U+F020 → byte 0x20 → WinAnsi "space" → " "
+        assert_eq!(resolve_pua_byte('\u{F020}'), ' ');
+    }
+
+    #[test]
+    fn resolve_pua_byte_extended_prefers_symbol() {
+        // U+F0A3 → byte 0xA3 > 0x7F → Symbol first → "lessequal" → ≤
+        assert_eq!(resolve_pua_byte('\u{F0A3}'), '\u{2264}');
+        // U+F0C8 → byte 0xC8 > 0x7F → Symbol first → "union" → ∪
+        assert_eq!(resolve_pua_byte('\u{F0C8}'), '\u{222A}');
+    }
+
+    #[test]
+    fn try_resolve_empty_returns_none() {
+        assert_eq!(try_resolve(""), None);
+        assert_eq!(try_resolve(".notdef"), None);
+    }
+
+    #[test]
+    fn try_resolve_valid_name() {
+        assert_eq!(try_resolve("equal"), Some('='));
+        assert_eq!(try_resolve("union"), Some('\u{222A}'));
     }
 }
