@@ -78,6 +78,8 @@ pub(crate) fn layout_page(page: &mut Page) {
 
     let mut blocks = col_blocks;
     blocks.extend(ruled.into_iter().map(Block::Table));
+    // Add image blocks so they appear in output along with text.
+    blocks.extend(page.images.iter().cloned().map(Block::Image));
     // Single column: order everything (including any full-width ruled table) by y.
     if ncols == 1 {
         let t = crate::profile::start(p);
