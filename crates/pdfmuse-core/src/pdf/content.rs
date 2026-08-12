@@ -23,7 +23,7 @@ use super::content_lex::{Lexer, Operand, Token};
 use super::fonts::Font;
 use super::graphics;
 use super::objects::PdfDoc;
-use crate::ir::{BBox, Char, FontRef, Rect, Rule, Warning, WarningKind};
+use crate::ir::{BBox, Char, FontRef, ImageRef, Rect, Rule, Warning, WarningKind};
 
 const IDENTITY: [f32; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
@@ -62,6 +62,7 @@ pub(crate) struct PageContent {
     pub chars: Vec<Char>,
     pub rects: Vec<Rect>,
     pub rules: Vec<Rule>,
+    pub images: Vec<ImageRef>,
     pub warnings: Vec<Warning>,
 }
 
@@ -90,7 +91,7 @@ pub(crate) fn extract_page(
     page_index: u32,
     page_height: f32,
 ) -> PageContent {
-    let mut out = PageContent { chars: Vec::new(), rects: Vec::new(), rules: Vec::new(), warnings: Vec::new() };
+    let mut out = PageContent { chars: Vec::new(), rects: Vec::new(), rules: Vec::new(), images: Vec::new(), warnings: Vec::new() };
 
     let bytes = match pdf.content_bytes(page_id) {
         Ok(b) => b,
@@ -129,11 +130,21 @@ fn run_stream(
 ) {
     // Resolve this stream's /XObject subdictionary once (not per `Do`), so looking up
     // a form by name is a cheap dict lookup even when it's invoked thousands of times.
+    // Some lopdf versions don't parse nested << >> as a Dictionary in all cases, so
+    // we also build a flat name→id map as a fallback.
     let xobject_dict: Option<Dictionary> = resources
         .get(b"XObject")
         .ok()
         .and_then(|o| pdf.resolve(o))
         .and_then(|o| o.as_dict().ok().cloned());
+    let xobject_ids: BTreeMap<Vec<u8>, Object> = xobject_dict
+        .iter()
+        .flat_map(|d| d.iter())
+        .filter_map(|(name, v)| {
+            let id = pdf.resolve(v)?.as_reference().ok()?;
+            Some((name.clone(), Object::Reference(id)))
+        })
+        .collect();
     let mut stack: Vec<GraphicsState> = Vec::new();
     let mut path = Path::default();
     // Path geometry is buffered until the painting op: only *stroked* paths become
@@ -267,15 +278,19 @@ fn run_stream(
             }
             // Inline image: skip the BI..ID..EI binary payload so it is not tokenized.
             "BI" => lex.skip_inline_image(),
-            // Form XObject: recurse into its content stream so text drawn inside a
-            // form (Canva/PDFium/design tools wrap the whole page this way) is
-            // extracted instead of silently dropped.
+            // XObject (Form or Image).  Forms recurse into their content stream;
+            // Images record their position and dimensions.
             "Do" if depth < 12 => {
-                // Resolve → decode → build fonts once per unique form, then reuse.
-                if let Some(id) = name_bytes(a.first())
-                    .as_deref()
-                    .and_then(|n| xobject_dict.as_ref()?.get(n).ok()?.as_reference().ok())
-                {
+                // Resolve XObject name via dict (fast path) or fallback map.
+                let xobj_id = name_bytes(a.first()).as_deref().and_then(|n| {
+                    xobject_dict
+                        .as_ref()
+                        .and_then(|d| d.get(n).ok())
+                        .or_else(|| xobject_ids.get(n))
+                        .and_then(|o| o.as_reference().ok())
+                });
+                if let Some(id) = xobj_id {
+                    // Try form XObject first — resolve, decode, build fonts once.
                     let cached = forms
                         .entry(id)
                         .or_insert_with(|| {
@@ -293,6 +308,33 @@ fn run_stream(
                             pdf, &cf.bytes, &cf.fonts, &cf.resources, child,
                             out, page_height, page_index, warned_cid, forms, depth + 1,
                         );
+                    } else if let Some((iw, ih, data_uri)) = resolve_image_xobject(pdf, id) {
+                        // Image XObject — record with on-page bbox and base64 data.
+                        // PDF images always render in a unit square [0,1]×[0,1]; the
+                        // `cm` operator in the CTM handles the actual on-page scale.
+                        // Using pixel dimensions (iw, ih) as text-space coords would
+                        // produce wildly wrong bboxes.
+                        let corners = [
+                            apply(&st.ctm, 0.0, 0.0),
+                            apply(&st.ctm, 1.0, 0.0),
+                            apply(&st.ctm, 0.0, 1.0),
+                            apply(&st.ctm, 1.0, 1.0),
+                        ];
+                        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                        for (x, y_user) in corners {
+                            let y = page_height - y_user;
+                            x0 = x0.min(x);
+                            y0 = y0.min(y);
+                            x1 = x1.max(x);
+                            y1 = y1.max(y);
+                        }
+                        out.images.push(ImageRef {
+                            id: format!("{}", id.0),
+                            bbox: BBox { x0, y0, x1, y1 },
+                            width: iw,
+                            height: ih,
+                            data: Some(data_uri),
+                        });
                     }
                 }
             }
@@ -504,6 +546,57 @@ fn resolve_form_stream(pdf: &PdfDoc<'_>, id: ObjectId) -> Option<(Vec<u8>, Optio
         .and_then(|o| pdf.resolve(o))
         .and_then(|o| o.as_dict().ok().cloned());
     Some((bytes, res, matrix))
+}
+
+/// Resolve an Image XObject to `(width, height, base64_data_uri)`.
+/// Returns `None` if the XObject is not an image.
+fn resolve_image_xobject(pdf: &PdfDoc<'_>, id: ObjectId) -> Option<(u32, u32, String)> {
+    let stream_obj = pdf.resolve(&Object::Reference(id))?;
+    let Object::Stream(s) = &stream_obj else {
+        return None;
+    };
+    if s.dict.get(b"Subtype").ok().and_then(|o| o.as_name().ok()) != Some(b"Image".as_ref()) {
+        return None;
+    }
+    let w = s.dict.get(b"Width").ok().map(obj_num).unwrap_or(0.0) as u32;
+    let h = s.dict.get(b"Height").ok().map(obj_num).unwrap_or(0.0) as u32;
+    if w == 0 || h == 0 {
+        return None;
+    }
+
+    let (raw, mime) = image_data_and_mime(s);
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
+    let data_uri = format!("data:{mime};base64,{b64}");
+    Some((w, h, data_uri))
+}
+
+/// Extract raw image bytes and a MIME type from an Image XObject stream.
+fn image_data_and_mime(stream: &lopdf::Stream) -> (Vec<u8>, &'static str) {
+    let filter = stream.dict.get(b"Filter").ok().and_then(|o| o.as_name().ok());
+    let raw = match filter {
+        // JPEG (DCTDecode) — data is already JPEG-encoded.
+        Some(b"DCTDecode") => {
+            return (stream.content.clone(), "image/jpeg");
+        }
+        // JPEG 2000 (JPXDecode) — data is already JP2-encoded.
+        Some(b"JPXDecode") => {
+            return (stream.content.clone(), "image/jp2");
+        }
+        // FlateDecode or no filter → decompress to raw pixels.
+        Some(b"FlateDecode") => stream.decompressed_content().unwrap_or_else(|_| stream.content.clone()),
+        _ => {
+            // Other filter or no filter — try decompress, fall back to raw.
+            if stream.dict.get(b"Filter").is_ok() {
+                stream.decompressed_content().unwrap_or_else(|_| stream.content.clone())
+            } else {
+                stream.content.clone()
+            }
+        }
+    };
+    // Raw pixel data — we don't re-encode to PNG here; store as octet-stream
+    // with width/height in the id so downstream consumers can reconstruct.
+    (raw, "application/octet-stream")
 }
 
 fn obj_num(o: &Object) -> f32 {
