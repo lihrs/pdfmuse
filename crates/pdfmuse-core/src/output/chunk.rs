@@ -57,8 +57,18 @@ pub fn chunk(doc: &Document) -> Vec<Chunk> {
                         heading_path: heading_path.clone(),
                     });
                 }
-                // Images carry no text to embed.
-                Block::Image(_) => {}
+                Block::Image(img) => {
+                    let text = img.data.clone().unwrap_or_else(|| format!("[image:{}]", img.id));
+                    if text.is_empty() {
+                        continue;
+                    }
+                    chunks.push(Chunk {
+                        text,
+                        page: page.index,
+                        bbox: img.bbox,
+                        heading_path: heading_path.clone(),
+                    });
+                }
             }
         }
     }
