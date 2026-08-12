@@ -105,7 +105,7 @@ impl Font {
 fn cid_font(doc: &Document, dict: &Dictionary, base: String) -> Font {
     let to_unicode_raw = to_unicode_map(doc, dict);
     let to_unicode = match to_unicode_raw {
-        Some(ref map) if is_pua_cmap(map) => repair_pua_cmap(map),
+        Some(ref map) if is_pua_cmap(map) && base.contains("Symbol") => repair_pua_cmap(map),
         Some(map) => map,
         None => BTreeMap::new(),
     };
@@ -205,22 +205,18 @@ fn repair_pua_cmap(map: &BTreeMap<u32, String>) -> BTreeMap<u32, String> {
 }
 
 /// Reinterpret a single PUA character U+F0XX back to a real Unicode character.
-/// ASCII-range bytes (0x00–0x7F) prefer WinAnsi (Latin); extended bytes
-/// (0x80–0xFF) prefer Symbol (math).  If neither resolves, returns the original
-/// PUA char — keeping a glyph is better than losing the character entirely.
+/// This is only called for fonts whose BaseFont name contains "Symbol", so
+/// Symbol encoding takes priority for all byte ranges.  WinAnsi is a fallback
+/// for cases where the glyph name is absent from the Symbol table.
+/// If neither resolves, returns the original PUA char — keeping a glyph is
+/// better than losing the character entirely.
 fn resolve_pua_byte(c: char) -> char {
     match c as u32 {
         pua @ 0xF000..=0xF0FF => {
             let byte = (pua - 0xF000) as usize;
-            if byte <= 0x7F {
-                try_resolve(encodings::WIN_ANSI[byte])
-                    .or_else(|| try_resolve(encodings::SYMBOL[byte]))
-                    .unwrap_or(c)
-            } else {
-                try_resolve(encodings::SYMBOL[byte])
-                    .or_else(|| try_resolve(encodings::WIN_ANSI[byte]))
-                    .unwrap_or(c)
-            }
+            try_resolve(encodings::SYMBOL[byte])
+                .or_else(|| try_resolve(encodings::WIN_ANSI[byte]))
+                .unwrap_or(c)
         }
         _ => c,
     }
@@ -602,27 +598,49 @@ mod tests {
     }
 
     #[test]
-    fn type0_pua_cmap_is_repaired_not_discarded() {
+    fn type0_symbol_pua_cmap_is_repaired() {
         let mut doc = empty_doc();
-        // PUA CMap mapping codes to U+F000+byte → should be repaired via
-        // Symbol encoding lookups, not discarded.
+        // Symbol font with PUA CMap → should be repaired via Symbol encoding.
         // 0x0001 → U+F03D (byte 0x3D = "equal" → "=")
         // 0x0002 → U+F0A3 (byte 0xA3 = "lessequal" → "≤")
         let cmap = b"1 beginbfchar\n<0001> <F03D>\n<0002> <F0A3>\nendbfchar".to_vec();
         let tu = doc.add_object(Stream::new(lopdf::Dictionary::new(), cmap));
         let cidfont = doc.add_object(dictionary! {
-            "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "X",
+            "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "SymbolMT",
         });
         let dict = dictionary! {
-            "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "X",
+            "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "TZCMBP+SymbolMT",
             "Encoding" => "Identity-H",
             "DescendantFonts" => vec![Object::Reference(cidfont)],
             "ToUnicode" => tu,
         };
         let f = Font::from_dict(&doc, &dict);
-        assert!(!f.unmapped_cid, "PUA CMap should be repaired, not discarded");
+        assert!(!f.unmapped_cid);
         assert_eq!(f.decode(0x0001).0, Some("="));
         assert_eq!(f.decode(0x0002).0, Some("\u{2264}"));
+    }
+
+    #[test]
+    fn type0_non_symbol_pua_cmap_preserved() {
+        let mut doc = empty_doc();
+        // Non-Symbol font (e.g. MT-Extra) with PUA CMap → should NOT be
+        // repaired. PUA chars are kept as-is since the encoding is unknown.
+        let cmap = b"1 beginbfchar\n<0001> <F067>\n<0002> <F075>\nendbfchar".to_vec();
+        let tu = doc.add_object(Stream::new(lopdf::Dictionary::new(), cmap));
+        let cidfont = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "CIDFontType2", "BaseFont" => "MT-Extra",
+        });
+        let dict = dictionary! {
+            "Type" => "Font", "Subtype" => "Type0", "BaseFont" => "MUFUVC+MT-Extra",
+            "Encoding" => "Identity-H",
+            "DescendantFonts" => vec![Object::Reference(cidfont)],
+            "ToUnicode" => tu,
+        };
+        let f = Font::from_dict(&doc, &dict);
+        assert!(!f.unmapped_cid);
+        // PUA codes preserved — not repaired to wrong characters
+        assert_eq!(f.decode(0x0001).0, Some("\u{F067}"));
+        assert_eq!(f.decode(0x0002).0, Some("\u{F075}"));
     }
 
     #[test]
@@ -638,19 +656,21 @@ mod tests {
     }
 
     #[test]
-    fn resolve_pua_byte_ascii_prefers_winansi() {
-        // U+F041 → byte 0x41 ≤ 0x7F → WinAnsi first → "A", not Symbol "Alpha" (Α)
-        assert_eq!(resolve_pua_byte('\u{F041}'), 'A');
-        // U+F020 → byte 0x20 → WinAnsi "space" → " "
+    fn resolve_pua_byte_symbol_first() {
+        // U+F041 → byte 0x41 → Symbol first → "Alpha" → Α (not WinAnsi "A")
+        assert_eq!(resolve_pua_byte('\u{F041}'), '\u{0391}');
+        // U+F0A3 → byte 0xA3 → Symbol "lessequal" → ≤
+        assert_eq!(resolve_pua_byte('\u{F0A3}'), '\u{2264}');
+        // U+F020 → byte 0x20 → Symbol "space" → " " (same in both)
         assert_eq!(resolve_pua_byte('\u{F020}'), ' ');
     }
 
     #[test]
-    fn resolve_pua_byte_extended_prefers_symbol() {
-        // U+F0A3 → byte 0xA3 > 0x7F → Symbol first → "lessequal" → ≤
-        assert_eq!(resolve_pua_byte('\u{F0A3}'), '\u{2264}');
-        // U+F0C8 → byte 0xC8 > 0x7F → Symbol first → "union" → ∪
-        assert_eq!(resolve_pua_byte('\u{F0C8}'), '\u{222A}');
+    fn resolve_pua_byte_winansi_fallback() {
+        // U+F0A0 → byte 0xA0 → Symbol has "Euro" → €
+        assert_eq!(resolve_pua_byte('\u{F0A0}'), '\u{20AC}');
+        // Non-PUA char passes through
+        assert_eq!(resolve_pua_byte('A'), 'A');
     }
 
     #[test]
