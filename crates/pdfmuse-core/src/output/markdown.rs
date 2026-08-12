@@ -4,7 +4,7 @@
 //! `#` heading levels) and GitHub-flavored tables. Purely geometric input in,
 //! deterministic Markdown out.
 
-use crate::ir::{Block, Document, Paragraph, Table};
+use crate::ir::{Block, Document, ImageRef, Paragraph, Table};
 
 /// Render `doc` to GitHub-flavored Markdown, pages and blocks in order.
 pub fn to_markdown(doc: &Document) -> String {
@@ -14,8 +14,7 @@ pub fn to_markdown(doc: &Document) -> String {
             match block {
                 Block::Paragraph(p) => blocks.push(paragraph_md(p)),
                 Block::Table(t) => blocks.push(table_md(t)),
-                // Images have no textual Markdown body in the IR; skipped.
-                Block::Image(_) => {}
+                Block::Image(img) => blocks.push(image_md(img)),
             }
         }
     }
@@ -33,11 +32,22 @@ pub fn to_text(doc: &Document) -> String {
             match block {
                 Block::Paragraph(p) => blocks.push(p.text.clone()),
                 Block::Table(t) => blocks.push(table_text(t)),
-                Block::Image(_) => {}
+                Block::Image(img) => blocks.push(image_text(img)),
             }
         }
     }
     blocks.join("\n")
+}
+
+fn image_md(img: &ImageRef) -> String {
+    match &img.data {
+        Some(uri) => format!("![image]({uri})"),
+        None => format!("![image](obj:{})", img.id),
+    }
+}
+
+fn image_text(img: &ImageRef) -> String {
+    img.data.clone().unwrap_or_else(|| format!("[image:{}]", img.id))
 }
 
 /// A table as plain text: cells space-joined per row, rows newline-joined.
