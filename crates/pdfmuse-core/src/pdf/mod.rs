@@ -69,6 +69,7 @@ fn extract_one(pdf: &PdfDoc<'_>, page_number: u32, page_id: ObjectId) -> (Page, 
     page.chars = pc.chars;
     page.rects = pc.rects;
     page.rules = pc.rules;
+    page.images = pc.images;
     let mut warnings = pc.warnings;
 
     // A page with images but no text layer is scanned → needs an OCR backend.
