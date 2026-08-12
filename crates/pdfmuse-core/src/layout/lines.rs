@@ -10,7 +10,7 @@ use crate::ir::{BBox, Char, TextLine};
 /// Subscripts/superscripts typically sit 0.3–0.5× font size off the baseline;
 /// 0.8 keeps them grouped with the main text line while still splitting truly
 /// separate lines (line spacing is normally ≥ 1.2× font size).
-const BASELINE_TOL: f32 = 0.8;
+const BASELINE_TOL: f32 = 0.5;
 /// Gap (fraction of font size) above which a space is inserted between chars.
 const SPACE_GAP: f32 = 0.25;
 
