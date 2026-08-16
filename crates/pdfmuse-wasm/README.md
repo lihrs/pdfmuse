@@ -32,10 +32,14 @@ const bytes = new Uint8Array(require("fs").readFileSync("resume.pdf"));
 const md    = to_markdown(bytes);              // headings + tables preserved
 ```
 
-Node ≥ 14. Use this build when a native addon won't load — bundled serverless
-runtimes, sandboxed FaaS platforms, anywhere the deploy artifact is JS-only. If
-you can ship a binary, [`@pdfmuse/node`](https://www.npmjs.com/package/@pdfmuse/node)
-is faster.
+**Node ≥ 18.** The module uses the `reference-types` and `multivalue` wasm
+proposals, which Rust enables by default for `wasm32-unknown-unknown` and
+current wasm-bindgen requires. Node 16 rejects it with `invalid value type
+'externref'`, Node 14 with `return count of 4 exceeds internal limit of 1`.
+
+Use this build when a native addon won't load — bundled serverless runtimes,
+sandboxed platforms, anywhere the deploy artifact is JS-only. If you can ship a
+binary, [`@pdfmuse/node`](https://www.npmjs.com/package/@pdfmuse/node) is faster.
 
 Extracts text with exact coordinates, tables and structure; deterministic, byte-identical
 to the Python/Node/Rust bindings. Scanned/image-only pages return a `NeedsOcr` warning to

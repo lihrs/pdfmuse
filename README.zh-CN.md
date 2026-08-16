@@ -72,7 +72,7 @@ pip install pdfmuse
 # Node（原生绑定）
 npm install @pdfmuse/node
 # WASM（浏览器 + Node，无原生二进制）
-npm install @pdfmuse/core   # 浏览器用 ESM import，Node >= 14 可直接 require
+npm install @pdfmuse/core   # 浏览器用 ESM import，Node >= 18 可直接 require
 ```
 
 ## 用法

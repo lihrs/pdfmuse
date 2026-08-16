@@ -74,7 +74,7 @@ pip install pdfmuse
 # Node
 npm install @pdfmuse/node   # native binding
 # WASM (browser + Node, no native binary)
-npm install @pdfmuse/core   # ESM `import` in the browser, `require` on Node >= 14
+npm install @pdfmuse/core   # ESM `import` in the browser, `require` on Node >= 18
 ```
 
 ## Usage

@@ -67,15 +67,21 @@ jobs:
           EOF
           node smoke.mjs
 
-  # CJS entry point (CJS-only Node hosts: bundled serverless runtimes, older
-  # Node, TypeScript compiled to commonjs). No init() — synchronous at require.
-  # Node 14 is the floor we claim; keep it in the matrix so a future glue change
-  # that needs newer syntax fails here rather than in someone's runtime.
+  # CJS entry point (CJS-only Node hosts: bundled serverless runtimes,
+  # TypeScript compiled to commonjs). No init() — synchronous at require.
+  #
+  # Node 18 is the floor, and it is set by the wasm module, not the JS: the
+  # `reference-types` and `multivalue` proposals are on by default for
+  # wasm32-unknown-unknown since Rust 1.82 and required by current wasm-bindgen.
+  # Node 16 fails to compile the module ("invalid value type 'externref'"), and
+  # Node 14 fails earlier still ("return count of 4 exceeds internal limit").
+  # Keep 18 pinned here so a toolchain bump that raises the floor again is caught
+  # by CI rather than by a user's runtime.
   npm-wasm-cjs:
     strategy:
       fail-fast: false
       matrix:
-        node: [14, 20]
+        node: [18, 20, 22]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
