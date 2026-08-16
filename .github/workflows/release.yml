@@ -146,13 +146,14 @@ jobs:
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
-      - run: wasm-pack build crates/pdfmuse-wasm --target web --release --out-dir pkg
-      # wasm-pack names the package after the crate (pdfmuse-wasm); publish under
-      # the reserved scoped name instead.
-      - name: rename package to @pdfmuse/core
-        working-directory: crates/pdfmuse-wasm/pkg
-        run: node -e "const f='package.json',p=require('./'+f);p.name='@pdfmuse/core';require('fs').writeFileSync(f,JSON.stringify(p,null,2))"
-      - working-directory: crates/pdfmuse-wasm/pkg
+      # Builds both wasm-pack targets and assembles the single @pdfmuse/core
+      # package: ESM glue for `import` (browsers/bundlers), CJS glue for
+      # `require` (CJS-only Node hosts), one shared .wasm. The script asserts
+      # the two targets emit an identical binary before sharing that copy.
+      - run: tools/build-npm-core.sh
+      - name: verify both entry points resolve
+        run: node tools/check-npm-core.mjs crates/pdfmuse-wasm/pkg-dist
+      - working-directory: crates/pdfmuse-wasm/pkg-dist
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

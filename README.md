@@ -73,8 +73,8 @@ cargo add pdfmuse-core
 pip install pdfmuse
 # Node
 npm install @pdfmuse/node   # native binding
-# WASM (browser)
-npm install @pdfmuse/core   # or build: wasm-pack build crates/pdfmuse-wasm --target web
+# WASM (browser + Node, no native binary)
+npm install @pdfmuse/core   # ESM `import` in the browser, `require` on Node >= 14
 ```
 
 ## Usage

@@ -1,7 +1,7 @@
 {
   "name": "@pdfmuse/node",
-  "version": "0.1.10",
-  "description": "Deterministic PDF/DOCX parser for RAG / LLMs \u2014 native Node.js binding.",
+  "version": "0.1.11",
+  "description": "Deterministic PDF/DOCX parser for RAG / LLMs — native Node.js binding.",
   "license": "MIT OR Apache-2.0",
   "repository": "https://github.com/casperkwok/pdfmuse",
   "main": "index.js",

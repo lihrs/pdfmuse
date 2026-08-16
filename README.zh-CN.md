@@ -71,8 +71,8 @@ cargo add pdfmuse-core
 pip install pdfmuse
 # Node（原生绑定）
 npm install @pdfmuse/node
-# WASM（浏览器）
-npm install @pdfmuse/core   # 或自行构建：wasm-pack build crates/pdfmuse-wasm --target web
+# WASM（浏览器 + Node，无原生二进制）
+npm install @pdfmuse/core   # 浏览器用 ESM import，Node >= 14 可直接 require
 ```
 
 ## 用法

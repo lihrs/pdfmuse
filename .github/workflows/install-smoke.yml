@@ -44,7 +44,8 @@ jobs:
           npm i "@pdfmuse/node@${{ inputs.version }}"
           node -e "const {parse}=require('@pdfmuse/node');const fs=require('fs');const d=parse(fs.readFileSync('tests/corpus/hello.pdf'));if(d.source!=='Pdf'||!d.pages.length)process.exit(1);console.log('npm-native ok',d.pages.length,'page(s)')"
 
-  npm-wasm:
+  # ESM entry point (browsers, bundlers, Node ESM): async init(bytes).
+  npm-wasm-esm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,12 +60,42 @@ jobs:
           import init, { parse } from "@pdfmuse/core";
           import { readFileSync } from "node:fs";
           import { fileURLToPath } from "node:url";
-          await init(readFileSync(fileURLToPath(new URL("./node_modules/@pdfmuse/core/pdfmuse_wasm_bg.wasm", import.meta.url))));
+          await init({ module_or_path: readFileSync(fileURLToPath(new URL("./node_modules/@pdfmuse/core/pdfmuse_wasm_bg.wasm", import.meta.url))) });
           const d = JSON.parse(parse(new Uint8Array(readFileSync("tests/corpus/hello.pdf"))));
           if (d.source !== "Pdf" || !d.pages.length) process.exit(1);
-          console.log("npm-wasm ok", d.pages.length, "page(s)");
+          console.log("npm-wasm-esm ok", d.pages.length, "page(s)");
           EOF
           node smoke.mjs
+
+  # CJS entry point (CJS-only Node hosts: bundled serverless runtimes, older
+  # Node, TypeScript compiled to commonjs). No init() — synchronous at require.
+  # Node 14 is the floor we claim; keep it in the matrix so a future glue change
+  # that needs newer syntax fails here rather than in someone's runtime.
+  npm-wasm-cjs:
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [14, 20]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - shell: bash
+        run: |
+          npm init -y >/dev/null
+          npm i "@pdfmuse/core@${{ inputs.version }}"
+          cat > smoke.cjs <<'EOF'
+          const { parse, to_text } = require("@pdfmuse/core");
+          const { readFileSync } = require("fs");
+          const bytes = new Uint8Array(readFileSync("tests/corpus/hello.pdf"));
+          const d = JSON.parse(parse(bytes));
+          if (d.source !== "Pdf" || !d.pages.length) process.exit(1);
+          if (!to_text(bytes).includes("Hello pdfmuse")) process.exit(1);
+          console.log("npm-wasm-cjs ok", d.pages.length, "page(s)");
+          EOF
+          node smoke.cjs
 
   cargo:
     strategy:
