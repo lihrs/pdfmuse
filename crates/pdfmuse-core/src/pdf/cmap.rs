@@ -23,7 +23,45 @@ pub(super) fn parse_to_unicode(bytes: &[u8]) -> BTreeMap<u32, String> {
             _ => i += 1,
         }
     }
+    repair_control_destinations(&mut map);
     map
+}
+
+/// Repair `/ToUnicode` destinations that contain control characters.
+///
+/// Real-world producers routinely map the space glyph (or `.notdef`) to U+0001 or
+/// U+0000 instead of U+0020 — one 70-page CJK document in the wild yields 11 873
+/// U+0001 across its text. Emitting them verbatim is faithful to the CMap but
+/// useless to every consumer: they are unprintable, they burn LLM tokens, and
+/// U+0000 breaks naive C-string/JSON handling downstream.
+///
+/// A destination that is *entirely* control characters becomes a single space
+/// rather than being dropped. Dropping was tried first — the interpreter skips a
+/// glyph with no text but still advances the text matrix, so in principle the
+/// layout engine could rebuild the gap from geometry. It does not: these glyphs
+/// carry a space's advance (~0.22 em), which sits below the inter-word gap
+/// threshold, so the neighbours get glued together — `多维表格-字段` for a title
+/// that reads `多维表格 - 字段`. Fabricating a join is worse than fabricating a
+/// separator, and the glyph is a space in every instance observed.
+///
+/// Control characters *mixed into* a longer destination are stripped instead: the
+/// printable half is the real text and no separator is warranted.
+///
+/// `\t` and `\n` are kept: a CMap mapping to them is unusual but meaningful.
+fn repair_control_destinations(map: &mut BTreeMap<u32, String>) {
+    for dst in map.values_mut() {
+        if !dst.chars().any(is_unusable_control) {
+            continue;
+        }
+        dst.retain(|c| !is_unusable_control(c));
+        if dst.is_empty() {
+            dst.push(' ');
+        }
+    }
+}
+
+fn is_unusable_control(c: char) -> bool {
+    matches!(c, '\u{0}'..='\u{8}' | '\u{b}'..='\u{1f}' | '\u{7f}')
 }
 
 /// `<src> <dst>` pairs until `endbfchar`.
@@ -182,6 +220,34 @@ mod tests {
         assert_eq!(m.get(&0x41).map(String::as_str), Some("a"));
         assert_eq!(m.get(&0x42).map(String::as_str), Some("b"));
         assert_eq!(m.get(&0x43).map(String::as_str), Some("c"));
+    }
+
+    #[test]
+    fn repairs_control_only_destinations_to_space() {
+        // Producers in the wild map the space glyph to U+0001 (or U+0000) instead
+        // of U+0020. Such an entry must not survive as text; it becomes a space,
+        // because dropping it glues the neighbouring words together.
+        let m = parse_to_unicode(
+            b"beginbfchar\n<01> <0001>\n<02> <0000>\n<03> <0020>\n<04> <0041>\nendbfchar",
+        );
+        assert_eq!(m.get(&0x01).map(String::as_str), Some(" "), "U+0001 → space");
+        assert_eq!(m.get(&0x02).map(String::as_str), Some(" "), "U+0000 → space");
+        assert_eq!(m.get(&0x03).map(String::as_str), Some(" "), "real spaces survive");
+        assert_eq!(m.get(&0x04).map(String::as_str), Some("A"));
+    }
+
+    #[test]
+    fn strips_control_chars_from_multi_unit_destinations() {
+        // A ligature/multi-unit destination keeps its printable half.
+        let m = parse_to_unicode(b"beginbfchar\n<10> <00410001>\nendbfchar");
+        assert_eq!(m.get(&0x10).map(String::as_str), Some("A"));
+    }
+
+    #[test]
+    fn keeps_tab_and_newline_destinations() {
+        let m = parse_to_unicode(b"beginbfchar\n<11> <0009>\n<12> <000A>\nendbfchar");
+        assert_eq!(m.get(&0x11).map(String::as_str), Some("\t"));
+        assert_eq!(m.get(&0x12).map(String::as_str), Some("\n"));
     }
 
     #[test]

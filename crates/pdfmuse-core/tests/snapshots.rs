@@ -68,6 +68,21 @@ fn snapshot_cjk_type0() {
     insta::assert_snapshot!("cjk", snapshot_json("cjk.pdf"));
 }
 
+/// Regression: a `/ToUnicode` that maps the space glyph to U+0001 (a real defect
+/// from design-tool PDF writers) must extract as a space, not as a control
+/// character and not as nothing — dropping the glyph glues the words together.
+/// Fixture built by `tools/make_tounicode_fixture.py`.
+#[test]
+fn snapshot_tounicode_control() {
+    let md = snapshot_markdown("tounicode_control.pdf");
+    assert_eq!(md.trim(), "AB CD", "control-mapped space must become a real space");
+    assert!(
+        !md.chars().any(|c| (c as u32) < 0x20 && c != '\n' && c != '\t'),
+        "no C0 control characters may reach the output"
+    );
+    insta::assert_snapshot!("tounicode_control", snapshot_json("tounicode_control.pdf"));
+}
+
 // --- M3: DOCX + output layer ---
 
 #[test]

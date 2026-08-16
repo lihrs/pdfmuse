@@ -1,0 +1,134 @@
+---
+source: crates/pdfmuse-core/tests/snapshots.rs
+expression: "snapshot_json(\"tounicode_control.pdf\")"
+---
+{
+  "metadata": {
+    "author": null,
+    "creator": null,
+    "keywords": null,
+    "page_count": 1,
+    "producer": null,
+    "subject": null,
+    "title": null
+  },
+  "outline": [],
+  "pages": [
+    {
+      "blocks": [
+        {
+          "Paragraph": {
+            "bbox": {
+              "x0": 20.0,
+              "x1": 50.02,
+              "y0": 38.0,
+              "y1": 50.0
+            },
+            "heading_level": null,
+            "text": "AB CD"
+          }
+        }
+      ],
+      "chars": [
+        {
+          "bbox": {
+            "x0": 20.0,
+            "x1": 26.67,
+            "y0": 38.0,
+            "y1": 50.0
+          },
+          "color": null,
+          "font": {
+            "name": "Test"
+          },
+          "size": 12.0,
+          "text": "A"
+        },
+        {
+          "bbox": {
+            "x0": 26.67,
+            "x1": 33.34,
+            "y0": 38.0,
+            "y1": 50.0
+          },
+          "color": null,
+          "font": {
+            "name": "Test"
+          },
+          "size": 12.0,
+          "text": "B"
+        },
+        {
+          "bbox": {
+            "x0": 33.34,
+            "x1": 36.68,
+            "y0": 38.0,
+            "y1": 50.0
+          },
+          "color": null,
+          "font": {
+            "name": "Test"
+          },
+          "size": 12.0,
+          "text": " "
+        },
+        {
+          "bbox": {
+            "x0": 36.68,
+            "x1": 43.35,
+            "y0": 38.0,
+            "y1": 50.0
+          },
+          "color": null,
+          "font": {
+            "name": "Test"
+          },
+          "size": 12.0,
+          "text": "C"
+        },
+        {
+          "bbox": {
+            "x0": 43.35,
+            "x1": 50.02,
+            "y0": 38.0,
+            "y1": 50.0
+          },
+          "color": null,
+          "font": {
+            "name": "Test"
+          },
+          "size": 12.0,
+          "text": "D"
+        }
+      ],
+      "height": 100.0,
+      "images": [],
+      "index": 0,
+      "lines": [
+        {
+          "bbox": {
+            "x0": 20.0,
+            "x1": 50.02,
+            "y0": 38.0,
+            "y1": 50.0
+          },
+          "chars": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "text": "AB CD"
+        }
+      ],
+      "links": [],
+      "rects": [],
+      "rotation": 0,
+      "rules": [],
+      "width": 200.0
+    }
+  ],
+  "source": "Pdf",
+  "warnings": []
+}
